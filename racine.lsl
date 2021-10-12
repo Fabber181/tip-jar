@@ -36,7 +36,9 @@ key note_key_exclu;
 list param_tipjar_excluRepartition = [];
 integer param_tipJar_Repart = 0;
 integer param_tipJar_montantLimite = 300;
-integer param_tipJar_tempslimite = 160;
+integer param_tipJar_tempslimite = 1;
+integer param_tipJar_tempslimiteSecondes = 0;
+integer param_tipJar_Timer = 0;
 key param_tipJar_keyDJ;
 key param_tipJar_club;
 
@@ -62,12 +64,23 @@ string menuOuvertureTextureId ="TEXTURE";
 string menuOuvertureUserDesc = "Voulez-vous Utiliser la tip jar ?";
 list menuOuvertureUserBout=["oui", "non"];
 
-// Commandes element : 
-key commandeIdDj;
+string menuFermetureTipJarDesc = "Voulez-vous liberer la tipJar ?";
+list menuFermetureTipJarBout = ["oui", "non"];
+
+// Commande Elements  
+key commandeIdDj; 
 key commandeIdClub;
-key commandeIdTexture; 
-integer commandeRepartition;
+key commandeIdTexture;
+string commandeChoixTexture;
+integer commandeRepartition; 
 integer commandeLimiteRepartition;
+string typeTexture;
+
+// Types de textures
+string COMMANDE_TYPE_PROFIL = "PROFIL";
+string COMMANDE_TYPE_ID = "UUID";
+string COMMANDE_TYPE_SANS = "SANS";
+
 
 // =========================== Fonctions générales  ================================
 /* Fonction de debug */
@@ -181,7 +194,7 @@ lectureExclu(string data)
     if (testNoteCarteCommentaire(data) == FALSE)
     {
         integer dataLength = llStringLength(data);
-        key codeExclu = (key) llGetSubString(data, 0, 36);
+        key codeExclu = (key) llStringTrim(llGetSubString(data, 0, 36), STRING_TRIM);
         
        // debug("lectureAdmin", "Les codes des DJ qui ne sont pas soumis à la repartition sont :" + (string) codeExclu + " pour une data de "+ data );
         param_tipjar_excluRepartition += codeExclu;
@@ -259,6 +272,33 @@ ouvertureMenuText(key avatar, string descriptif, string type)
     llSetTimerEvent(timerChangementAnim);
 }
 
+/* Méthode qui recherche les répartition en fonction de l'utilisateur. Si l'utilisateur est dans la lites, la tip jar va utiliser ses paramètres.*/
+getCommandeAvatars(key avatar)
+{
+    commandeIdDj= avatar;
+    commandeIdClub = param_tipJar_club;
+    // Traitement de la répartition à partir de l'avatrs
+  integer indexDjList = llListFindList(param_tipjar_excluRepartition, [(key) avatar]);
+
+    // SI le DJ est dans la note carte
+    if(indexDjList >=0)
+    {
+        commandeRepartition = llList2Integer(param_tipjar_excluRepartition, indexDjList+1);
+        commandeLimiteRepartition = llList2Integer(param_tipjar_excluRepartition, indexDjList+2);
+    }
+    // Sinon
+    else
+    {
+        commandeRepartition = llList2Integer(param_tipjar_excluRepartition, indexDjList+1);
+        commandeLimiteRepartition = llList2Integer(param_tipjar_excluRepartition, indexDjList+2);
+    }
+
+    debug("getCommandeAvatars", "Les informations suivantes ont été renseignés : Id de l'avatars " + (string) commandeIdDj 
+    + " ID de l'avatars du club " + (string) commandeIdClub 
+    + " Repartition des tip " + (string) commandeRepartition 
+    + " limite de la répartition " + (string) commandeLimiteRepartition);
+}
+
 // =====================================================================================================================
 // ------------------------------ Etat par défaut ----------------------------------------------------------------------
 // =====================================================================================================================
@@ -319,7 +359,7 @@ default
                 // Fin de l'initialsiaiton
                 //debug("lecture des notes cartes fin ", (string) param_tipjar_excluRepartition);
                 llOwnerSay("Fin de l'initialisation");
-                llOwnerSay("♦ Paramètres generaux :\n    - Valeur Repartition = " + (string) param_tipJar_Repart + "% \n" +
+                llOwnerSay("Paramètres generaux :\n    - Valeur Repartition = " + (string) param_tipJar_Repart + "% \n" +
                     "    - Limite Repartition = " + (string) param_tipJar_montantLimite + "l$ \n" +
                     "    - Limite de temps = "+(string) param_tipJar_tempslimite + " minutes");
                 
@@ -346,6 +386,7 @@ state animation
     }
     state_entry()
     {
+        commandeTipJar("stop");
         commandeAnimation("ecran_animation");
     }
     touch_start( integer num_detected )
@@ -360,7 +401,7 @@ state animation
         {
             if(message == "Pour moi")
             {
-
+                getCommandeAvatars(id);
                 ouvertureMenuBouton(id, menuOuvertureTextureDesc, menuOuvertureTextureBout);
             }
             else if (message == "Pour quelqu'un")
@@ -369,6 +410,7 @@ state animation
             }
             else if (menuTextBoxData == menuOuvertureAdmIdUser)
             {
+                getCommandeAvatars(message);
                 menuTextBoxData = "x";
                 ouvertureMenuBouton(id, menuOuvertureTextureDesc, menuOuvertureTextureBout);  
             }
@@ -377,18 +419,21 @@ state animation
         {
             if(message == "oui")
             {
+               getCommandeAvatars(id);
                ouvertureMenuBouton(id, menuOuvertureTextureDesc, menuOuvertureTextureBout);   
             }
         }
 
         // Commun sur la modification des textures. 
-        if (message == "profil")
+        if (message == "Profil")
         {
-            llSay(0, "Texture du profile");
+            commandeChoixTexture = COMMANDE_TYPE_PROFIL;
+            state tipJar;
         }
-        else if (message == "aucune")
+        else if (message == "Aucune")
         {
-            llSay(0, "On applique pas de texture");
+            commandeChoixTexture = COMMANDE_TYPE_SANS;
+            state tipJar;
         }
         else if (message == "UUID")
         { 
@@ -396,7 +441,9 @@ state animation
         }
         else if (menuTextBoxData == menuOuvertureTextureId)
         {
-            llSay(0, "Application de la texture de l'utilisateur.");
+            commandeChoixTexture = COMMANDE_TYPE_ID;
+            commandeIdTexture = (key) message;
+            state tipJar;
         }
     }
     timer()
@@ -404,5 +451,66 @@ state animation
         llListenRemove(chanelMenu);
         commandeAnimation("ecran_animation");
     }
+}
+state tipJar
+{
+    changed( integer change )
+    {
+        llResetScript();
+        llSetTimerEvent(timerChangementAnim);
+    }
+    state_entry()
+    {
+        debug("state_entry0", "Lancement de l'état de la Tip-jar avec les paramètres suivant : \n - ID du DJ :" + llKey2Name(commandeIdDj) + 
+             " \n - ID de la répartition du club :" + llKey2Name(commandeIdClub) +
+             " \n - ID de la texture  :" + (string) commandeIdTexture +
+             " \n - Type de texture :" + (string) commandeChoixTexture +
+             " \n - Repartition :" + (string) commandeRepartition +
+             " \n - Limite de la repartition :" + (string) commandeLimiteRepartition         
+        );
 
+        commandeTipJar("DjId="+(string) commandeIdDj + " ClId=" + (string) commandeIdClub + " repa=" + (string) commandeRepartition +  " limite="+ (string) commandeLimiteRepartition );
+        
+        // Si image de profile
+        if(commandeChoixTexture == COMMANDE_TYPE_PROFIL)
+            commandeAnimation("tipJar profile=" + (string) commandeIdDj );
+
+        // Si UUID 
+        else if (commandeChoixTexture == COMMANDE_TYPE_ID)
+            commandeAnimation("tipJar UUID=" + (string) commandeIdTexture);
+
+        // Si aucune image
+        else 
+            commandeAnimation("tipJar sans");
+
+        llSetTimerEvent(timerChangementAnim);
+        param_tipJar_tempslimiteSecondes = param_tipJar_tempslimite*60;
+        param_tipJar_Timer = 0;
+    }
+
+    listen( integer channel, string name, key id, string message )
+    {
+        if (message == "oui")
+            state animation;
+    }
+
+    touch_end( integer num_detected )
+    {
+        key utilisateur = llDetectedKey(0);
+        if (utilisateur == commandeIdDj || isAdmin(utilisateur) == TRUE)
+        {
+            ouvertureMenuBouton(llDetectedKey(0), menuFermetureTipJarDesc, menuFermetureTipJarBout);
+        }
+        else
+             llInstantMessage(utilisateur, "Cette tip-jar est actuellement utilisée, vous ne pouvez pas vous y connecter. Veillez contacter les administrateurs ou le DJ en cours de set pour prendre les droits de cette denrière.");
+    }
+    timer()
+    {
+        param_tipJar_Timer += timerChangementAnim;
+
+        if(param_tipJar_Timer > param_tipJar_tempslimiteSecondes)
+        {
+            state animation;
+        }
+    }
 }
